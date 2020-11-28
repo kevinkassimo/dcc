@@ -22,8 +22,13 @@ window.main = myFunc;
 
 ### Usage
 
-```
+```sh
+# Running the example in this repo
 $ deno run -A --unstable dcc.ts -o example example.ts
-# You will see a bunch of output. The Rust building phase will take quite a while during first run, and will also take a few minutes
+# You will see a bunch of output. The Rust building phase will take quite a while during first run, and will also take a few minutes on source content changes.
+
 $ ./example eval "main()"
+This function is snapshotted.
+>> Current directory is /Users/kun/Projects/Deno/dcc.
+>> Current time is 11-28-2020 03:09:38.255
 ```
