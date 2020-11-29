@@ -3,27 +3,45 @@ import { assert, path, fs, log, flags } from "./deps.ts";
 /*
 General design idea (hacking strategy):
 
-Clone the whole deno repo, insert the bundled file into cli/rt/AA_dcc.js
+Clone the whole deno repo, insert the bundled file into cli/rt/AA_dcc.js.
 
-Since there is no easy way to hook into window.onload (due to event creation function not invoked during build)
-we will have to require user to write code that looks like
+window.dccMain is automatically triggered on window `load` event through hacks around `bootstrapMainRuntime`.
+For example:
 
-function main() {
+window.dccMain = () => {
+  console.log("Hello world!");
+};
+
+You can also inject other functions to `window`, but be aware: only functions attached to the global object will be accessible later.
+
+function myHelloFunc() {
   console.log(">>> Hello");
 }
+window.myHelloFunc;
 
-window.main = main;
+We will also inject `let window = globalThis;` at the beginning of the output bundle to avoid missing window reference.
 
-We will inject `let window = globalThis;` at the beginning of the output bundle to avoid missing window reference.
+To run the output build, use the command
 
-To run the output weird build, use the command
-
-dcc_output eval "window.main()";
+dcc_output eval ""
 
 Limitations:
 1. Input file MUST NOT INCLUDE global Deno namespace/window usages: they are not defined yet.
 2. Deno.args is not well supported in `deno eval` mode.
  */
+
+const BUNDLE_PREAMBLE = `const __origBootstrapMainRuntime = globalThis.bootstrap.mainRuntime;
+function __wrappedBootstrapMainRuntime() {
+  __origBootstrapMainRuntime();
+  globalThis.addEventListener("load", () => {
+    if (typeof window.dccMain === "function") {
+      window.dccMain();
+    }
+  });
+}
+globalThis.bootstrap.mainRuntime = __wrappedBootstrapMainRuntime;
+const window = globalThis;
+`;
 
 async function checkCommandExists(cmd: string): Promise<boolean> {
   if (Deno.build.os === "windows") {
@@ -77,9 +95,9 @@ async function prepareSourceBundle(filename: string): Promise<string> {
     "deno", "bundle", filename, bundlePath
   ], "Failed to create input bundle file");
 
-  // Fix the problem where window is not yet globally defined.
+  // Fix the problem where window is not yet globally defined. Also hook to window load event.
   let bundleContent = await Deno.readTextFile(bundlePath);
-  bundleContent = "let window = globalThis;\n" + bundleContent;
+  bundleContent = BUNDLE_PREAMBLE + bundleContent;
   await Deno.writeTextFile(bundlePath, bundleContent);
 
   return bundlePath;
@@ -137,7 +155,6 @@ async function main(): Promise<void> {
 
   log.info("[dcc] Copying binary to target output path");
   const compileOutputPath = getCompileOutputPath(cachedDenoRepo);
-  console.log(compileOutputPath);
   await Deno.copyFile(compileOutputPath, outputBinaryPath);
 
   log.info("[dcc] Build complete!");
